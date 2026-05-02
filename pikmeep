@@ -1,0 +1,166 @@
+#!/bin/bash
+# pikmeep - fuzzy package finder for PikaOS
+# https://github.com/yourusername/pikmeep
+
+
+if ! command -v fzf &>/dev/null; then
+  echo "pikmeep needs fzf. Install it with: pikman install fzf"
+  exit 1
+fi
+
+if ! command -v pikman &>/dev/null; then
+  echo "pikmeep needs pikman, which should already be on PikaOS."
+  exit 1
+fi
+
+
+
+BOLD="\033[1m"
+GREEN="\033[0;32m"
+YELLOW="\033[0;33m"
+RED="\033[0;31m"
+RESET="\033[0m"
+
+
+FZF_OPTS=(
+  --height=80%
+  --layout=reverse
+  --border=rounded
+  --preview-window='down:50%:wrap'
+  --preview-label=' Package Info '
+  --color='border:#89b4fa,label:#89b4fa,prompt:#cba6f7,pointer:#f38ba8'
+  --prompt='  search > '
+  --pointer='▸'
+  --bind='alt-p:toggle-preview'
+  --header='  tab: multi-select  |  alt-p: toggle preview  |  esc: quit'
+)
+
+
+search_apt() {
+  echo -e "${BOLD}Searching APT packages...${RESET}"
+  local selected
+  selected=$(apt-cache search '' 2>/dev/null \
+    | fzf "${FZF_OPTS[@]}" \
+      --multi \
+      --preview='apt-cache show {1} 2>/dev/null' \
+    | awk '{print $1}')
+
+  [ -z "$selected" ] && return
+
+  confirm_and_install "$selected" "" "APT"
+}
+
+
+search_flatpak() {
+  echo -e "${BOLD}Loading Flatpak package list (this may take a moment)...${RESET}"
+
+
+  if ! flatpak remotes 2>/dev/null | grep -q flathub; then
+    echo -e "${YELLOW}Flathub remote not found. Adding it now...${RESET}"
+    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+  fi
+
+  local selected
+  selected=$(flatpak remote-ls flathub --columns=application,name,description 2>/dev/null \
+    | fzf "${FZF_OPTS[@]}" \
+      --multi \
+      --preview='flatpak remote-info flathub {1} 2>/dev/null' \
+      --with-nth='1,2,3' \
+    | awk '{print $1}')
+
+  [ -z "$selected" ] && return
+
+  confirm_and_install "$selected" "--flatpak" "Flatpak"
+}
+
+
+search_aur() {
+  if ! command -v python3 &>/dev/null; then
+    echo "AUR search needs python3."
+    exit 1
+  fi
+
+  echo -e "${BOLD}Enter a search term for the AUR:${RESET} "
+  read -r query
+
+  [ -z "$query" ] && echo "No search term entered." && return
+
+  echo -e "${BOLD}Querying AUR...${RESET}"
+
+
+  local results
+  results=$(curl -sf "https://aur.archlinux.org/rpc/v5/search/${query}" \
+    | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for p in sorted(data.get('results', []), key=lambda x: x.get('NumVotes', 0), reverse=True):
+    name = p.get('Name', '')
+    desc = p.get('Description', 'No description')
+    votes = p.get('NumVotes', 0)
+    print(f'{name}  |  {desc}  |  ★ {votes}')
+")
+
+  if [ -z "$results" ]; then
+    echo -e "${RED}No AUR results found for '${query}'.${RESET}"
+    return
+  fi
+
+  local selected
+  selected=$(echo "$results" \
+    | fzf "${FZF_OPTS[@]}" \
+      --multi \
+      --preview='echo {} | awk -F"|" "{print \$1}" | xargs -I{} curl -sf "https://aur.archlinux.org/rpc/v5/info/{}" | python3 -c "import sys,json; p=json.load(sys.stdin)[\"results\"][0]; print(\"Name:\", p[\"Name\"], \"\nVersion:\", p.get(\"Version\",\"?\"), \"\nVotes:\", p.get(\"NumVotes\",0), \"\nMaintainer:\", p.get(\"Maintainer\",\"?\"), \"\n\nDescription:\", p.get(\"Description\",\"?\"), \"\n\nURL:\", p.get(\"URL\",\"?\"))" 2>/dev/null' \
+    | awk -F'|' '{gsub(/ /,"",$1); print $1}')
+
+  [ -z "$selected" ] && return
+
+  confirm_and_install "$selected" "--arch" "AUR"
+}
+
+
+confirm_and_install() {
+  local packages="$1"
+  local flag="$2"
+  local source="$3"
+
+  echo ""
+  echo -e "${BOLD}  Ready to install:${RESET}"
+  echo "$packages" | while read -r pkg; do
+    echo -e "    ${GREEN}▸${RESET} $pkg"
+  done
+  echo ""
+  echo -e "  ${BOLD}Source :${RESET}  $source"
+  echo -e "  ${BOLD}Command:${RESET}  pikman install $flag $(echo "$packages" | tr '\n' ' ')"
+  echo ""
+  read -rp "  Install? [y/N] " confirm
+
+  if [[ "$confirm" =~ ^[Yy]$ ]]; then
+    echo ""
+    echo "$packages" | while read -r pkg; do
+      echo -e "${BOLD}Installing ${pkg}...${RESET}"
+      pikman install $flag "$pkg"
+    done
+  else
+    echo -e "${YELLOW}Cancelled.${RESET}"
+  fi
+}
+
+
+SOURCE=$(printf "APT  — native Debian packages\nFlatpak  — sandboxed universal packages\nAUR  — Arch User Repository" \
+  | fzf \
+    --height=30% \
+    --layout=reverse \
+    --border=rounded \
+    --prompt='  pikmeep > ' \
+    --pointer='▸' \
+    --color='border:#89b4fa,label:#89b4fa,prompt:#cba6f7,pointer:#f38ba8' \
+    --header='  Pick a package source' \
+    --no-preview \
+  | awk '{print $1}')
+
+case "$SOURCE" in
+  APT)     search_apt ;;
+  Flatpak) search_flatpak ;;
+  AUR)     search_aur ;;
+  *)       echo "Nothing selected. Bye!"; exit 0 ;;
+esac
