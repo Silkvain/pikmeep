@@ -9,7 +9,7 @@ It is built for PikaOS but works on any Debian-based system with pikman and fzf.
 **Option 1 — one-liner (recommended):**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yourusername/pikmeep/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Silkvain/pikmeep/main/install.sh | bash
 ```
 
 **Option 2 — download and run manually:**
