@@ -21,7 +21,7 @@ if [ -f "./$SCRIPT_NAME" ]; then
 else
 
   sudo curl -fsSL \
-    "https://raw.githubusercontent.com/yourusername/pikmeep/main/pikmeep" \
+    "https://raw.githubusercontent.com/Silkvain/pikmeep/main/pikmeep" \
     -o "$INSTALL_DIR/$SCRIPT_NAME"
 fi
 
